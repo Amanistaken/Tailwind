@@ -6,39 +6,41 @@ const isValidPhone = (str) =>
 
 import { Form, redirect, useActionData, useNavigate } from "react-router-dom";
 import { createOrder } from "../../services/apiRestaurant";
-
-const fakeCart = [
-  {
-    pizzaId: 12,
-    name: "Mediterranean",
-    quantity: 2,
-    unitPrice: 16,
-    totalPrice: 32,
-  },
-  {
-    pizzaId: 6,
-    name: "Vegetale",
-    quantity: 1,
-    unitPrice: 13,
-    totalPrice: 13,
-  },
-  {
-    pizzaId: 11,
-    name: "Spinach and Mushroom",
-    quantity: 1,
-    unitPrice: 15,
-    totalPrice: 15,
-  },
-];
+import { useSelector } from "react-redux";
+import { getCartItems, getCartTotalPrice } from "../cart/cartSlice";
+import EmptyCart from "../cart/EmptyCart";
+import store from "../../store";
+import { clearCart } from "../cart/cartSlice";
+import { formatCurrency } from "../../utils/helpers";
+import { useState } from "react";
+import { useDispatch } from "react-redux";
+import { fetchAddress } from "../user/userSlice";
 
 function CreateOrder() {
+  const [withPriority, setWithPriority] = useState(false);
+
+  const dispatch = useDispatch();
+
+  const {
+    username,
+    status: addressStatus,
+    position,
+    address,
+    error: errorAddress,
+  } = useSelector((state) => state.user);
+  const isLoadingAddress = addressStatus === "loading";
+  console.log(position);
+
   const navigation = useNavigate();
   const isSubmitting = navigation.state === "submitting";
 
   const formErrors = useActionData();
-  // const [withPriority, setWithPriority] = useState(false);
-  const cart = fakeCart;
-  console.log(cart);
+  const cart = useSelector(getCartItems);
+  const totalCartPrice = useSelector(getCartTotalPrice);
+  const priorityPrice = withPriority ? totalCartPrice * 0.2 : 0;
+  const totalPrice = totalCartPrice + priorityPrice;
+
+  if (!cart.length) return <EmptyCart />;
 
   return (
     <div className="px-4 py-6">
@@ -47,7 +49,13 @@ function CreateOrder() {
       <Form method="POST">
         <div className="mb-5 flex flex-col gap-2 sm:flex-row sm:items-center ">
           <label className="sm:basis-40">First Name</label> <br></br>
-          <input className="input" type="text" name="customer" required />
+          <input
+            className="input"
+            type="text"
+            name="customer"
+            defaultValue={username}
+            required
+          />
         </div>
 
         <div className="mb-5 flex flex-col gap-2 sm:flex-row sm:items-center ">
@@ -55,31 +63,74 @@ function CreateOrder() {
           <div>
             <input className="input" type="tel" name="phone" required />
           </div>
-          {formErrors?.phone && <p className="text-xs mt-2 bg-red-100 text-red-700 p-2 rounded-md">{formErrors.phone}</p>}
+          {formErrors?.phone && (
+            <p className="text-xs mt-2 bg-red-100 text-red-700 p-2 rounded-md">
+              {formErrors.phone}
+            </p>
+          )}
         </div>
 
         <div className="mb-5 flex flex-col gap-2 sm:flex-row sm:items-center ">
           <label className="sm:basis-40">Address</label>
           <div>
-            <input className="input" type="text" name="address" required />
+            <input
+              className="input"
+              type="text"
+              name="address"
+              defaultValue={address}
+              disabled={isLoadingAddress}
+              required
+            />
           </div>
+          {!position.latitude && !position.longitude && (
+            <>
+              <button
+                type="button"
+                onClick={() => dispatch(fetchAddress())}
+                className="input bg-yellow-400"
+                disabled={isLoadingAddress}
+                defaultValue={address}
+              >
+                Get Position
+              </button>
+              {addressStatus === "error" && (
+                <p className="text-xs mt-2 bg-red-100 text-red-700 p-2 rounded-md">
+                  {errorAddress}
+                </p>
+              )}
+            </>
+          )}
         </div>
 
         <div className="mt-2 mb-12 flex items-center gap-5">
           <input
-          className="h-6 w-6 accent-yellow-400 focus:outline-none focus:ring focus:ring-yellow-400 focus:ring-offset-2"
+            className="h-6 w-6 accent-yellow-400 focus:outline-none focus:ring focus:ring-yellow-400 focus:ring-offset-2"
             type="checkbox"
             name="priority"
             id="priority"
-            // value={withPriority}
-            // onChange={(e) => setWithPriority(e.target.checked)}
+            value={withPriority}
+            onChange={(e) => setWithPriority(e.target.checked)}
           />
-          <label htmlFor="priority" className="font-medium">Want to give your order priority?</label>
+          <label htmlFor="priority" className="font-medium">
+            Want to give your order priority?
+          </label>
         </div>
 
         <div className="inline-block font-semibold  bg-yellow-400 px-4 py-2 rounded-full hover:bg-yellow-300 ">
+          <input type="hidden" name="cart" value={JSON.stringify(cart)} />
+          <input
+            type="hidden"
+            name="position"
+            value={
+              position.latitude && position.longitude
+                ? `${position.latitude}, ${position.longitude}`
+                : ""
+            }
+          />
           <button disabled={isSubmitting}>
-            {isSubmitting ? "Placing order...." : "Order now"}
+            {isSubmitting
+              ? "Placing order...."
+              : ` Order now ${formatCurrency(totalPrice)}`}
           </button>
         </div>
       </Form>
@@ -94,7 +145,7 @@ export async function action({ request }) {
   const order = {
     ...data,
     cart: JSON.parse(data.cart),
-    priority: data.priority === "on",
+    priority: data.priority === "true",
   };
 
   const errors = {};
@@ -104,7 +155,8 @@ export async function action({ request }) {
   if (Object.keys(errors).length > 0) return errors;
 
   const newOrder = await createOrder(order);
-  console.log(createOrder);
+
+  store.dispatch(clearCart());
 
   return redirect(`/order/${newOrder.id}`);
 }
